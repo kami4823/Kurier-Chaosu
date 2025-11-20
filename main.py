@@ -137,4 +137,76 @@ async def zamow(interaction: Interaction,
 
     produkt_info = data[key]
     max_q = produkt_info.get("max_quantity", 10)
-    if ilosc > m
+    if ilosc > max_q:
+        await interaction.response.send_message(f"⚠️ Maksymalna ilość dla `{produkt}` to {max_q} szt.", ephemeral=True)
+        return
+
+    producent_info = produkt_info["producent"]
+    order_id = str(uuid.uuid4())[:8]
+
+    # Embed do producenta
+    embed = nextcord.Embed(title="📦 Nowe zamówienie", color=0x3498db)
+    embed.add_field(name="Produkt", value=produkt, inline=False)
+    embed.add_field(name="Ilość", value=str(ilosc), inline=False)
+    embed.add_field(name="Zamawiający", value=f"{interaction.user.mention}", inline=False)
+    embed.set_footer(text=f"Order ID: {order_id}")
+
+    # Przyciski "Zakończone"
+    class DoneView(View):
+        def __init__(self, order_id, buyer_id, product_name, qty):
+            super().__init__(timeout=None)
+            self.order_id = order_id
+            self.buyer_id = buyer_id
+            self.product_name = product_name
+            self.qty = qty
+
+        @nextcord.ui.button(label="Zakończone", style=ButtonStyle.green, custom_id="done_button")
+        async def done_button(self, button: Button, interaction_btn: Interaction):
+            caller = interaction_btn.user
+            buyer = bot.get_user(self.buyer_id)
+            if buyer:
+                try:
+                    await buyer.send(f"🍽️ Twoje zamówienie ({self.qty}x {self.product_name}) jest gotowe do odbioru! Producent: {caller.mention}")
+                    await interaction_btn.response.send_message("Potwierdzone — kupujący został powiadomiony.", ephemeral=True)
+                except Exception:
+                    await interaction_btn.response.send_message("Nie udało się wysłać wiadomości.", ephemeral=True)
+            else:
+                await interaction_btn.response.send_message("Nie znaleziono kupującego.", ephemeral=True)
+
+    view = DoneView(order_id, interaction.user.id, produkt, ilosc)
+
+    # Wyślij PW do producenta (mention lub nazwa)
+    sent = False
+    if producent_info.startswith("<@") and ">" in producent_info:
+        try:
+            uid = int(producent_info.replace("<@", "").replace("!", "").replace(">", ""))
+            user = bot.get_user(uid) or await bot.fetch_user(uid)
+            if user:
+                await user.send(embed=embed, view=view)
+                sent = True
+        except:
+            sent = False
+
+    if not sent and interaction.guild:
+        for m in interaction.guild.members:
+            if producent_info.lower().strip("@") in (m.display_name.lower() + m.name.lower()):
+                try:
+                    await m.send(embed=embed, view=view)
+                    sent = True
+                    break
+                except:
+                    sent = False
+
+    if not sent:
+        await interaction.response.send_message("Nie udało się wysłać wiadomości do producenta. Sprawdź `/dodaj_produkt`.", ephemeral=True)
+        return
+
+    await interaction.response.send_message(f"✅ Zamówienie wysłane. Order ID: {order_id}", ephemeral=True)
+
+# --------- Uruchom bot ---------
+if __name__ == "__main__":
+    token = os.environ.get("BOT_TOKEN")
+    if not token:
+        print("Brak BOT_TOKEN w zmiennych środowiskowych!")
+    else:
+        bot.run(token)
